@@ -1,0 +1,291 @@
+from pathlib import Path
+import shutil
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+
+CATEGORIES = {
+    "Images": {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"},
+    "Vidéos": {".mp4", ".mov", ".avi", ".mkv", ".webm"},
+    "Documents": {
+        ".pdf", ".doc", ".docx", ".txt",
+        ".ppt", ".pptx", ".xls", ".xlsx"
+    },
+    "Audio": {".mp3", ".wav", ".m4a", ".flac", ".aac"},
+    "Archives": {".zip", ".rar", ".7z", ".tar", ".gz"},
+    "Programmes": {".py", ".js", ".html", ".css", ".exe"},
+}
+
+
+def trouver_categorie(extension):
+    extension = extension.lower()
+
+    for categorie, extensions in CATEGORIES.items():
+        if extension in extensions:
+            return categorie
+
+    return "Autres"
+
+
+def trouver_nom_disponible(destination):
+    """Évite d'écraser un fichier existant."""
+    if not destination.exists():
+        return destination
+
+    numero = 1
+
+    while True:
+        nouveau_nom = (
+            destination.parent
+            / f"{destination.stem}_{numero}{destination.suffix}"
+        )
+
+        if not nouveau_nom.exists():
+            return nouveau_nom
+
+        numero += 1
+
+
+class ApplicationRangement:
+    def __init__(self, fenetre):
+        self.fenetre = fenetre
+        self.fenetre.title("Organisateur de fichiers")
+        self.fenetre.geometry("850x550")
+        self.fenetre.minsize(700, 450)
+
+        self.dossier = None
+        self.operations = []
+
+        self.creer_interface()
+
+    def creer_interface(self):
+        style = ttk.Style()
+        style.theme_use("clam")
+
+        style.configure(
+            "Titre.TLabel",
+            font=("Segoe UI", 22, "bold"),
+        )
+
+        style.configure(
+            "Action.TButton",
+            font=("Segoe UI", 11, "bold"),
+            padding=10,
+        )
+
+        cadre_principal = ttk.Frame(self.fenetre, padding=20)
+        cadre_principal.pack(fill="both", expand=True)
+
+        titre = ttk.Label(
+            cadre_principal,
+            text="📁 Organisateur de fichiers",
+            style="Titre.TLabel",
+        )
+        titre.pack(pady=(0, 10))
+
+        description = ttk.Label(
+            cadre_principal,
+            text=(
+                "Choisis un dossier, prévisualise le rangement, "
+                "puis confirme les déplacements."
+            ),
+            font=("Segoe UI", 11),
+        )
+        description.pack(pady=(0, 20))
+
+        cadre_dossier = ttk.Frame(cadre_principal)
+        cadre_dossier.pack(fill="x", pady=(0, 15))
+
+        self.chemin_affiche = ttk.Entry(
+            cadre_dossier,
+            font=("Segoe UI", 10),
+            state="readonly",
+        )
+        self.chemin_affiche.pack(
+            side="left",
+            fill="x",
+            expand=True,
+            padx=(0, 10),
+        )
+
+        bouton_choisir = ttk.Button(
+            cadre_dossier,
+            text="Choisir un dossier",
+            command=self.choisir_dossier,
+        )
+        bouton_choisir.pack(side="right")
+
+        cadre_tableau = ttk.Frame(cadre_principal)
+        cadre_tableau.pack(fill="both", expand=True)
+
+        colonnes = ("fichier", "type", "destination")
+
+        self.tableau = ttk.Treeview(
+            cadre_tableau,
+            columns=colonnes,
+            show="headings",
+        )
+
+        self.tableau.heading("fichier", text="Fichier")
+        self.tableau.heading("type", text="Extension")
+        self.tableau.heading("destination", text="Destination")
+
+        self.tableau.column("fichier", width=380)
+        self.tableau.column("type", width=100, anchor="center")
+        self.tableau.column("destination", width=180, anchor="center")
+
+        barre = ttk.Scrollbar(
+            cadre_tableau,
+            orient="vertical",
+            command=self.tableau.yview,
+        )
+
+        self.tableau.configure(yscrollcommand=barre.set)
+
+        self.tableau.pack(
+            side="left",
+            fill="both",
+            expand=True,
+        )
+
+        barre.pack(
+            side="right",
+            fill="y",
+        )
+
+        cadre_bas = ttk.Frame(cadre_principal)
+        cadre_bas.pack(fill="x", pady=(15, 0))
+
+        self.statut = ttk.Label(
+            cadre_bas,
+            text="Aucun dossier sélectionné",
+            font=("Segoe UI", 10),
+        )
+        self.statut.pack(side="left")
+
+        self.bouton_ranger = ttk.Button(
+            cadre_bas,
+            text="Ranger les fichiers",
+            command=self.ranger_fichiers,
+            style="Action.TButton",
+            state="disabled",
+        )
+        self.bouton_ranger.pack(side="right")
+
+    def choisir_dossier(self):
+        chemin = filedialog.askdirectory(
+            title="Choisir le dossier à ranger"
+        )
+
+        if not chemin:
+            return
+
+        self.dossier = Path(chemin)
+
+        self.chemin_affiche.configure(state="normal")
+        self.chemin_affiche.delete(0, tk.END)
+        self.chemin_affiche.insert(0, str(self.dossier))
+        self.chemin_affiche.configure(state="readonly")
+
+        self.analyser_dossier()
+
+    def analyser_dossier(self):
+        self.operations.clear()
+
+        for element in self.tableau.get_children():
+            self.tableau.delete(element)
+
+        fichiers = [
+            element
+            for element in self.dossier.iterdir()
+            if element.is_file()
+        ]
+
+        for fichier in fichiers:
+            categorie = trouver_categorie(fichier.suffix)
+            dossier_destination = self.dossier / categorie
+
+            self.operations.append(
+                (fichier, dossier_destination)
+            )
+
+            self.tableau.insert(
+                "",
+                "end",
+                values=(
+                    fichier.name,
+                    fichier.suffix or "Sans extension",
+                    categorie,
+                ),
+            )
+
+        nombre = len(self.operations)
+
+        if nombre == 0:
+            self.statut.configure(
+                text="Aucun fichier à ranger"
+            )
+            self.bouton_ranger.configure(state="disabled")
+        else:
+            self.statut.configure(
+                text=f"{nombre} fichier(s) prêt(s) à être rangé(s)"
+            )
+            self.bouton_ranger.configure(state="normal")
+
+    def ranger_fichiers(self):
+        confirmation = messagebox.askyesno(
+            "Confirmer le rangement",
+            (
+                f"Déplacer {len(self.operations)} fichier(s) "
+                "dans leurs dossiers respectifs ?"
+            ),
+        )
+
+        if not confirmation:
+            return
+
+        fichiers_deplaces = 0
+        erreurs = []
+
+        for fichier, dossier_destination in self.operations:
+            try:
+                dossier_destination.mkdir(exist_ok=True)
+
+                destination = trouver_nom_disponible(
+                    dossier_destination / fichier.name
+                )
+
+                shutil.move(
+                    str(fichier),
+                    str(destination),
+                )
+
+                fichiers_deplaces += 1
+
+            except Exception as erreur:
+                erreurs.append(f"{fichier.name} : {erreur}")
+
+        self.analyser_dossier()
+
+        if erreurs:
+            messagebox.showwarning(
+                "Rangement partiellement terminé",
+                (
+                    f"{fichiers_deplaces} fichier(s) déplacé(s).\n\n"
+                    + "\n".join(erreurs)
+                ),
+            )
+        else:
+            messagebox.showinfo(
+                "Rangement terminé",
+                (
+                    f"{fichiers_deplaces} fichier(s) "
+                    "ont été rangés avec succès !"
+                ),
+            )
+
+
+if __name__ == "__main__":
+    fenetre = tk.Tk()
+    application = ApplicationRangement(fenetre)
+    fenetre.mainloop()
